@@ -1335,15 +1335,35 @@ fn load_payload(
                     .map_err(StartMicrovmError::InvalidKernelBundle)?
             };
 
-            Ok((
+            let guest_mem = guest_mem
+                .insert_region(Arc::new(
+                    GuestRegionMmap::new(kernel_region, GuestAddress(kernel_guest_addr))
+                        .map_err(StartMicrovmError::GuestMemoryMmap)?,
+                ))
+                .map_err(StartMicrovmError::GuestMemoryMmap)?;
+
+            let maybe_initrd_config = if let Some(initrd_bundle) = &_vm_resources.initrd_bundle {
+                let initrd_data = unsafe {
+                    std::slice::from_raw_parts(
+                        initrd_bundle.host_addr as *mut u8,
+                        initrd_bundle.size,
+                    )
+                };
                 guest_mem
-                    .insert_region(Arc::new(
-                        GuestRegionMmap::new(kernel_region, GuestAddress(kernel_guest_addr))
-                            .map_err(StartMicrovmError::GuestMemoryMmap)?,
-                    ))
-                    .map_err(StartMicrovmError::GuestMemoryMmap)?,
+                    .write(initrd_data, GuestAddress(_arch_mem_info.initrd_addr))
+                    .unwrap();
+                Some(InitrdConfig {
+                    address: GuestAddress(_arch_mem_info.initrd_addr),
+                    size: initrd_data.len(),
+                })
+            } else {
+                None
+            };
+
+            Ok((
+                guest_mem,
                 GuestAddress(kernel_entry_addr),
-                None,
+                maybe_initrd_config,
                 None,
             ))
         }
@@ -1449,7 +1469,17 @@ pub fn create_guest_memory(
                 } else {
                     return Err(StartMicrovmError::MissingKernelConfig);
                 };
-            arch::arch_memory_regions(mem_size, Some(kernel_guest_addr), kernel_size, 0, None)
+            arch::arch_memory_regions(
+                mem_size,
+                Some(kernel_guest_addr),
+                kernel_size,
+                vm_resources
+                    .initrd_bundle
+                    .as_ref()
+                    .map(|initrd| initrd.size as u64)
+                    .unwrap_or(0),
+                None,
+            )
         }
         Payload::ExternalKernel(external_kernel) => arch::arch_memory_regions(
             mem_size,
