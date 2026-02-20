@@ -1649,9 +1649,7 @@ impl Vcpu {
     #[cfg(not(test))]
     // Transition to the exited state.
     fn exit(&mut self, exit_code: u8) -> StateMachine<Self> {
-        self.response_sender
-            .send(VcpuResponse::Exited(exit_code))
-            .expect("failed to send Exited status");
+        let _ = self.response_sender.send(VcpuResponse::Exited(exit_code));
 
         if let Err(e) = self.exit_evt.write(1) {
             error!("Failed signaling vcpu exit event: {e}");

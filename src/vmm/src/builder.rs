@@ -958,6 +958,7 @@ pub fn build_microvm(
         exit_evt,
         exit_observers: Vec::new(),
         exit_code: exit_code.clone(),
+        shutdown_exit_code: None,
         vm,
         mmio_device_manager,
         #[cfg(target_arch = "x86_64")]

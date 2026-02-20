@@ -203,6 +203,8 @@ pub struct Vmm {
     exit_observers: Vec<Arc<Mutex<dyn VmmExitObserver>>>,
     exit_code: Arc<AtomicI32>,
 
+    shutdown_exit_code: Option<i32>,
+
     // Guest VM devices.
     mmio_device_manager: MMIODeviceManager,
     #[cfg(target_arch = "x86_64")]
@@ -355,20 +357,28 @@ impl Vmm {
 
     /// Waits for all vCPUs to exit and terminates the Firecracker process.
     pub fn stop(&mut self, exit_code: i32) {
-        info!("Vmm is stopping.");
+        if self.shutdown_exit_code.is_none() {
+            info!("Vmm is stopping.");
 
-        for observer in &self.exit_observers {
-            observer
-                .lock()
-                .expect("Poisoned mutex for exit observer")
-                .on_vmm_exit();
-        }
+            self.vcpus_handles.drain(..).for_each(|handler| {
+                if let Ok(_) = handler.send_event(VcpuEvent::Pause) {
+                    let _ = handler.response_receiver().recv();
+                }
+            });
 
-        // Exit from Firecracker using the provided exit code. Safe because we're terminating
-        // the process anyway.
-        unsafe {
-            libc::_exit(exit_code);
+            for observer in &self.exit_observers {
+                observer
+                    .lock()
+                    .expect("Poisoned mutex for exit observer")
+                    .on_vmm_exit();
+            }
+
+            self.shutdown_exit_code = Some(exit_code);
         }
+    }
+
+    pub fn shutdown_exit_code(&self) -> Option<i32> {
+        self.shutdown_exit_code
     }
 
     /// Returns a reference to the inner KVM Vm object.
